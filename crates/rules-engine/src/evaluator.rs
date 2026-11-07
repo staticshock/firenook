@@ -181,7 +181,22 @@ fn evaluate_with_state<A: DocumentAccess + ?Sized>(
     };
     for branch in branches {
         evaluator.allowed = false;
-        evaluator.query_branch = branch;
+        // A branch that pins `__name__` to one document is decided as a get of
+        // that document, as the official emulator does: the wildcards bind to
+        // its path and `resource` is the stored document, or null.
+        evaluator.pinned = None;
+        if let Some(path) = branch.as_deref().and_then(pinned_path) {
+            match access.get(&path) {
+                Ok(resource) => evaluator.pinned = Some((path, resource)),
+                Err(error) => {
+                    evaluator.record_error(RuntimeError::new(format!(
+                        "document access failed: {error}"
+                    )));
+                    break;
+                }
+            }
+        }
+        evaluator.query_branch = branch.filter(|_| evaluator.pinned.is_none());
         for block in &program.matches {
             evaluator.walk(block, &[], &functions);
             if evaluator.allowed {
@@ -212,6 +227,22 @@ fn evaluate_with_state<A: DocumentAccess + ?Sized>(
             evaluator.refused_by
         },
     }
+}
+
+/// The rules path of the document a query branch pins with `__name__ ==`.
+fn pinned_path(branch: &[FieldConstraint]) -> Option<String> {
+    branch
+        .iter()
+        .find_map(|constraint| match &constraint.value {
+            Value::Path(name)
+                if constraint.field == ["__name__"]
+                    && constraint.operator == crate::ConstraintOperator::Equal =>
+            {
+                name.find("/databases/")
+                    .map(|start| name[start..].to_owned())
+            }
+            _ => None,
+        })
 }
 
 struct AccessState {
@@ -301,6 +332,7 @@ struct Evaluator<'a, 'observer, A: DocumentAccess + ?Sized> {
     refused_by: Vec<RefusingAllow>,
     call_depth: usize,
     query_branch: Option<Vec<crate::FieldConstraint>>,
+    pinned: Option<(String, Option<Resource>)>,
     trace: Option<&'a mut EvaluationTrace>,
     observer: Option<&'a mut (dyn CoverageObserver + 'observer)>,
     provenance: QueryProvenance,
@@ -366,6 +398,7 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             refused_by: Vec::new(),
             call_depth: 0,
             query_branch: None,
+            pinned: None,
             trace,
             observer,
             provenance,
@@ -397,7 +430,11 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         {
             query_constraints::bindings(&pattern, &self.request.path, scope)
         } else {
-            match_pattern(&pattern, &self.request.path).map(|bindings| {
+            let path = self
+                .pinned
+                .as_ref()
+                .map_or(self.request.path.as_str(), |(path, _)| path.as_str());
+            match_pattern(&pattern, path).map(|bindings| {
                 bindings
                     .into_iter()
                     .map(|(name, value)| (name, EvalValue::Data(value)))
@@ -418,8 +455,9 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
                             EvalValue::Data(object.to_value())
                         })
                 } else {
-                    self.request
-                        .resource
+                    self.pinned
+                        .as_ref()
+                        .map_or(&self.request.resource, |(_, resource)| resource)
                         .clone()
                         .map_or(EvalValue::Data(Value::Null), EvalValue::Resource)
                 },

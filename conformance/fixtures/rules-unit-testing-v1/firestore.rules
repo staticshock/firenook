@@ -17,4 +17,10 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff';
     }
   }
+  match /databases/{database}/documents/teams/{team} {
+    allow list: if exists(/databases/$(database)/documents/members/$(team));
+  }
+  match /databases/{database}/documents/chores/{chore} {
+    allow list: if resource.data.owner == request.auth.uid;
+  }
 }

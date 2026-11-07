@@ -8,6 +8,7 @@ import { after, before, beforeEach, test } from "node:test";
 import { assertFails, assertSucceeds, initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
 import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 import { deleteObject, getBytes, getMetadata, listAll, ref, uploadBytes } from "firebase/storage";
+import { documentId } from "firebase/firestore";
 
 const fixture = new URL("../fixtures/rules-unit-testing-v1/", import.meta.url);
 const projectId = process.env.GCLOUD_PROJECT ?? "demo-firenook-rules-testing";
@@ -120,4 +121,19 @@ test("withSecurityRulesDisabled writes what the rules refuse, and clearStorage r
   await env.withSecurityRulesDisabled(async (context) => {
     assert.deepEqual((await listAll(ref(context.storage(bucket)))).items.map((item) => item.fullPath), []);
   });
+});
+
+test("a query pinned to document IDs is ruled as reads of those documents", async () => {
+  await seed("members/a", {});
+  await seed("teams/a", {});
+  await seed("teams/b", {});
+  await seed("chores/mine", { owner: "alice" });
+  const alice = env.authenticatedContext("alice").firestore();
+  await assertSucceeds(getDocs(query(collection(alice, "teams"), where(documentId(), "==", "a"))));
+  await assertSucceeds(getDocs(query(collection(alice, "teams"), where(documentId(), "in", ["a"]))));
+  await assertFails(getDocs(query(collection(alice, "teams"), where(documentId(), "in", ["a", "b"]))));
+  await assertFails(getDocs(query(collection(alice, "teams"), where(documentId(), "!=", "b"))));
+  const chores = (id: string) => query(collection(alice, "chores"), where("owner", "==", "alice"), where(documentId(), "==", id));
+  await assertSucceeds(getDocs(chores("mine")));
+  await assertFails(getDocs(chores("missing")));
 });
