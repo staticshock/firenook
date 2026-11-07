@@ -805,6 +805,9 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
             EvalValue::Resource(resource) => match name {
                 "data" => Ok(EvalValue::Data(Value::Map(resource.data))),
                 "__name__" => Ok(EvalValue::Data(Value::Path(resource.name))),
+                "id" => Ok(EvalValue::data(
+                    resource.name.rsplit('/').next().unwrap_or_default(),
+                )),
                 "createTime" => resource.create_time.map_or_else(
                     || Err(RuntimeError::new("resource createTime is unavailable")),
                     |value| Ok(EvalValue::Data(Value::Timestamp(value))),

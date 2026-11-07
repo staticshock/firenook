@@ -9,6 +9,16 @@ service cloud.firestore {
       allow create: if request.auth != null && request.resource.data.author == request.auth.uid;
       allow update, delete: if request.auth != null && resource.data.author == request.auth.uid;
     }
+    match /badges/{badge} {
+      allow get: if resource.id == resource.data.want;
+      allow create: if request.resource.id == request.resource.data.want;
+      allow update: if request.resource.id == badge && resource.id == badge;
+      allow delete: if resource.id == 'a';
+      allow list: if resource.id == 'a';
+      match /badges/{inner} {
+        allow get: if resource.id == inner && resource.id != badge;
+      }
+    }
     match /admin/{doc} {
       allow read, write: if request.auth.token.admin == true;
     }

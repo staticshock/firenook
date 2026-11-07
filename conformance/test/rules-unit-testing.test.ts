@@ -90,6 +90,30 @@ test("clearFirestore empties the database", async () => {
   });
 });
 
+test("resource.id is the document ID, not a data field", async () => {
+  await seed("badges/a", { want: "a", id: "other" });
+  await seed("badges/b", { want: "x" });
+  await seed("badges/a b", { want: "a b" });
+  await seed("badges/é", { want: "é" });
+  await seed("badges/a/badges/a", {});
+  await seed("badges/a/badges/b", {});
+  const alice = env.authenticatedContext("alice").firestore();
+  await assertSucceeds(getDoc(doc(alice, "badges/a")));
+  await assertFails(getDoc(doc(alice, "badges/b")));
+  await assertSucceeds(getDoc(doc(alice, "badges/a b")));
+  await assertSucceeds(getDoc(doc(alice, "badges/é")));
+  await assertSucceeds(setDoc(doc(alice, "badges/c"), { want: "c" }));
+  await assertFails(setDoc(doc(alice, "badges/d"), { want: "x" }));
+  await assertSucceeds(updateDoc(doc(alice, "badges/b"), { n: 1 }));
+  await assertFails(deleteDoc(doc(alice, "badges/b")));
+  await assertSucceeds(deleteDoc(doc(alice, "badges/a")));
+  // An unfiltered list does not decide it.
+  await assertFails(getDocs(collection(alice, "badges")));
+  // In a subcollection it is the document's ID, not its parent's.
+  await assertSucceeds(getDoc(doc(alice, "badges/a/badges/b")));
+  await assertFails(getDoc(doc(alice, "badges/a/badges/a")));
+});
+
 test("Storage rules decide uploads, reads and lists by uid", async () => {
   const alice = env.authenticatedContext("alice").storage(bucket);
   await assertSucceeds(uploadBytes(ref(alice, "users/alice/notes.txt"), new TextEncoder().encode("hello"), { contentType: "text/plain" }));
