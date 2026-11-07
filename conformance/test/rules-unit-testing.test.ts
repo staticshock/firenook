@@ -106,6 +106,16 @@ test("Storage rules decide uploads, reads and lists by uid", async () => {
   await assertSucceeds(deleteObject(ref(alice, "users/alice/notes.txt")));
 });
 
+test("a function's let fails the call only when its return reads it", async () => {
+  await seed("rosters/a", { team: "a" });
+  await seed("rosters/free", { team: null });
+  await seed("rosters/odd", { team: { name: "a" } });
+  const alice = env.authenticatedContext("alice").firestore();
+  await assertSucceeds(getDoc(doc(alice, "rosters/free")));
+  await assertFails(getDoc(doc(alice, "rosters/a")));
+  await assertFails(getDoc(doc(alice, "rosters/odd")));
+});
+
 test("withSecurityRulesDisabled writes what the rules refuse, and clearStorage removes it", async () => {
   await env.withSecurityRulesDisabled(async (context) => {
     await uploadBytes(ref(context.storage(bucket), "public/logo.png"), new Uint8Array(16), { contentType: "image/png" });

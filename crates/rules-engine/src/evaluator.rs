@@ -265,6 +265,7 @@ enum EvalValue {
     QueryData,
     Constraint(query_constraints::Constraint),
     Unknown,
+    Error(RuntimeError),
 }
 
 impl EvalValue {
@@ -683,8 +684,10 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         name: &str,
         environment: &BTreeMap<String, EvalValue>,
     ) -> Result<EvalValue, RuntimeError> {
-        if let Some(value) = environment.get(name) {
-            return Ok(value.clone());
+        match environment.get(name) {
+            Some(EvalValue::Error(error)) => return Err(error.clone()),
+            Some(value) => return Ok(value.clone()),
+            None => {}
         }
         let namespace = match name {
             "duration" => Namespace::Duration,
@@ -897,13 +900,15 @@ impl<'a, 'observer, A: DocumentAccess + ?Sized> Evaluator<'a, 'observer, A> {
         for (name, value) in function.parameters.iter().zip(arguments) {
             environment.insert(name.clone(), value);
         }
-        let result = (|| {
-            for (name, expression) in &function.lets {
-                let value = self.eval_expr(expression, &mut environment, functions)?;
-                environment.insert(name.clone(), value);
-            }
-            self.eval_expr(&function.result, &mut environment, functions)
-        })();
+        // Every `let` is evaluated, and its document accesses counted, but
+        // its error is raised only where it is read.
+        for (name, expression) in &function.lets {
+            let value = self
+                .eval_expr(expression, &mut environment, functions)
+                .unwrap_or_else(EvalValue::Error);
+            environment.insert(name.clone(), value);
+        }
+        let result = self.eval_expr(&function.result, &mut environment, functions);
         self.call_depth -= 1;
         if !function.lets.is_empty() {
             self.observe(
